@@ -1,11 +1,13 @@
 const { INTERNAL } = self.YOUSYNC_PROTOCOL;
 
 const $ = (id) => document.getElementById(id);
+const log = (...a) => console.log('%c[YouSync][popup]', 'color:#ff0033', ...a);
 
 let lastState = null;
 
 function send(type, payload = {}) {
-  return chrome.runtime.sendMessage({ type, payload }).catch(() => {});
+  log('-> bg', type, payload);
+  return chrome.runtime.sendMessage({ type, payload }).catch((e) => log('falha sendMessage', e));
 }
 
 function displayName() {
@@ -16,6 +18,7 @@ function displayName() {
 
 function render(state) {
   lastState = state;
+  log('estado', state);
   if (!state) return;
 
   $('conn-dot').classList.toggle('connected', !!state.connected);

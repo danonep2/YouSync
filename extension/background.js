@@ -9,9 +9,13 @@ const DEFAULT_SERVER = 'ws://localhost:8080';
 const RECONNECT_BASE = 1000;
 const RECONNECT_MAX = 15000;
 
+const DEBUG = true;
+const log = (...a) => DEBUG && console.log('%c[YouSync][bg]', 'color:#ff0033', ...a);
+
 let ws = null;
 let reconnectAttempts = 0;
 let reconnectTimer = null;
+let outbox = []; // mensagens enfileiradas enquanto o WS não está aberto
 
 // Estado da sessão mantido em memória e espelhado em storage.session.
 let state = {
@@ -55,10 +59,19 @@ function pushState() {
 async function sendToContent(message) {
   try {
     const tabs = await chrome.tabs.query({ url: '*://*.youtube.com/*' });
-    for (const tab of tabs) {
-      chrome.tabs.sendMessage(tab.id, message).catch(() => {});
+    if (!tabs.length) {
+      log('sendToContent: nenhuma aba do YouTube encontrada para', message.type);
+      return;
     }
-  } catch (_) {}
+    log('-> content', message.type, message.payload?.kind || message.payload?.role || '', `(${tabs.length} aba(s))`);
+    for (const tab of tabs) {
+      chrome.tabs.sendMessage(tab.id, message).catch((e) => {
+        log('content não respondeu na aba', tab.id, '— recarregue a aba do YouTube?', e?.message || e);
+      });
+    }
+  } catch (e) {
+    log('sendToContent erro', e);
+  }
 }
 
 function updateContentRole() {
@@ -70,28 +83,47 @@ function updateContentRole() {
 
 function wsSend(type, payload = {}) {
   if (ws && ws.readyState === WebSocket.OPEN) {
+    log('-> server', type, payload);
     ws.send(JSON.stringify({ type, payload }));
+  } else {
+    log('WS não aberto — enfileirando', type);
+    outbox.push({ type, payload });
   }
 }
 
+function flushOutbox() {
+  if (!outbox.length) return;
+  log('esvaziando outbox:', outbox.length, 'mensagem(ns)');
+  const queued = outbox;
+  outbox = [];
+  for (const m of queued) wsSend(m.type, m.payload);
+}
+
 function connect() {
-  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+    log('connect(): já conectado/conectando');
+    return;
+  }
   clearTimeout(reconnectTimer);
+  log('conectando em', state.serverUrl);
 
   try {
     ws = new WebSocket(state.serverUrl);
   } catch (e) {
+    log('falha ao criar WebSocket', e);
     scheduleReconnect();
     return;
   }
 
   ws.onopen = () => {
+    log('WS aberto');
     reconnectAttempts = 0;
     state.connected = true;
     state.lastError = null;
     pushState();
     // Reentra na sala após reconexão.
     if (state.pending) {
+      log('reentrando na sala (pending)', state.pending.kind);
       if (state.pending.kind === 'create') {
         wsSend(C2S.CREATE_ROOM, state.pending.payload);
       } else if (state.pending.kind === 'join') {
@@ -99,17 +131,20 @@ function connect() {
         wsSend(C2S.SYNC_REQUEST, {});
       }
     }
+    flushOutbox();
   };
 
   ws.onmessage = (ev) => handleServerMessage(ev.data);
 
-  ws.onclose = () => {
+  ws.onclose = (ev) => {
+    log('WS fechado', ev.code, ev.reason);
     state.connected = false;
     pushState();
     if (state.active) scheduleReconnect();
   };
 
-  ws.onerror = () => {
+  ws.onerror = (e) => {
+    log('WS erro', e?.message || e);
     state.lastError = 'Falha de conexão com o servidor';
   };
 }
@@ -137,6 +172,7 @@ function handleServerMessage(raw) {
   let msg;
   try { msg = JSON.parse(raw); } catch { return; }
   const { type, payload = {} } = msg;
+  if (type !== S2C.PING) log('<- server', type, payload);
 
   switch (type) {
     case S2C.PING:
@@ -244,6 +280,7 @@ function notifyAd(displayName) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const { type, payload = {} } = message || {};
+  if (type !== INTERNAL.GET_STATE && type !== INTERNAL.CONTENT_EVENT) log('<- ui/runtime', type, payload);
 
   switch (type) {
     case INTERNAL.GET_STATE:
@@ -315,6 +352,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // Eventos vindos do player (content script).
 function handleContentEvent(payload) {
+  log('<- content evento', payload.event, 'isHost=', state.isHost, payload);
   switch (payload.event) {
     case 'play':
     case 'pause':
