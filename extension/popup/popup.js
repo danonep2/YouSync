@@ -36,7 +36,9 @@ function render(state) {
   // banner de anúncio
   const ad = $('ad-banner');
   if (state.adPause) {
-    ad.textContent = `⏸ Pausado: anúncio em reprodução para ${state.adPause.displayName}. Retoma quando terminar.`;
+    ad.textContent = state.adPause.isOwner
+      ? '▶ Você está assistindo a um anúncio. Os demais aguardam você.'
+      : `⏸ Pausado: anúncio em reprodução para ${state.adPause.displayName}. Retoma quando terminar.`;
     ad.classList.remove('hidden');
   } else {
     ad.classList.add('hidden');
@@ -101,6 +103,7 @@ function renderRoom(state) {
   $('room-visibility').textContent = room.isPublic ? 'Sala pública' : 'Sala privada';
 
   // Controles compartilhados: host pode alternar; participante vê (somente leitura).
+  log('renderRoom: sharedControls=', state.sharedControls, 'isHost=', state.isHost);
   const sharedToggle = $('shared-toggle');
   sharedToggle.checked = !!state.sharedControls;
   sharedToggle.disabled = !state.isHost;

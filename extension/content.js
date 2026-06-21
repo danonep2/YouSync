@@ -273,12 +273,13 @@
         case 'prepare': prepare(payload); break;
         case 'start': start(payload); break;
         case 'ad_pause':
-          // A sala pausou por anúncio. Se o anúncio é MEU, continuo reproduzindo
-          // (para assistir/pular); só pauso se o anúncio é de outra pessoa.
-          adPausedByRoom = true;
-          if (adShowing) {
+          // O servidor diz se o anúncio é MEU (isOwner). Se for, continuo
+          // reproduzindo (assisto/pulo o anúncio); se for de outro, pauso.
+          if (payload.isOwner) {
+            adPausedByRoom = false;
             log('<- AD_PAUSE: o anúncio é meu, continuo reproduzindo');
           } else {
+            adPausedByRoom = true;
             log('<- AD_PAUSE: pausando até o anúncio de outro terminar');
             withRemote(() => { const v = getVideo(); if (v) v.pause(); });
           }

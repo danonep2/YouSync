@@ -115,6 +115,7 @@ async function sendToContent(message) {
 
 function updateContentRole() {
   if (!state.room) return;
+  log('updateContentRole: isHost=', state.isHost, 'sharedControls=', state.sharedControls, '-> canControl=', canControl());
   sendToContent({
     type: INTERNAL.CONTENT_SET_ROLE,
     payload: { role: state.isHost ? 'host' : 'participant', canControl: canControl() },
@@ -281,11 +282,14 @@ function handleServerMessage(raw) {
       applyVideoState('sync', payload);
       return;
 
-    case S2C.AD_PAUSE:
-      state.adPause = { userId: payload.userId, displayName: payload.displayName };
-      sendToContent({ type: INTERNAL.CONTENT_APPLY, payload: { kind: 'ad_pause' } });
-      notifyAd(payload.displayName);
+    case S2C.AD_PAUSE: {
+      // Eu sou o dono do anúncio? (decisão autoritativa, sem corrida de timing)
+      const isOwner = payload.userId === state.you;
+      state.adPause = { userId: payload.userId, displayName: payload.displayName, isOwner };
+      sendToContent({ type: INTERNAL.CONTENT_APPLY, payload: { kind: 'ad_pause', isOwner } });
+      if (!isOwner) notifyAd(payload.displayName);
       return pushState();
+    }
 
     case S2C.AD_RESUME:
       state.adPause = null;

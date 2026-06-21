@@ -135,17 +135,18 @@ export function handleMessage(manager, ws, raw) {
         you: ws.userId,
         isHost: target.hostId === ws.userId,
       });
+      // Se a sala está pausada por anúncio, informa antes do SYNC_STATE para
+      // que o recém-chegado não tente reproduzir por um instante.
+      if (target.adUsers.size > 0) {
+        const adId = [...target.adUsers][0];
+        const adUser = target.users.get(adId);
+        send(ws, S2C.AD_PAUSE, { userId: adId, displayName: adUser?.displayName || '—' });
+      }
       // Estado atual para o recém-chegado se alinhar.
       send(ws, S2C.SYNC_STATE, syncStatePayload(target));
       // Se há um carregamento sincronizado em andamento, inclui o recém-chegado.
       if (target.loadingVideoId != null) {
         send(ws, S2C.VIDEO_CHANGE, { videoId: target.loadingVideoId, time: target.state.time, startPaused: true });
-      }
-      // Se a sala está pausada por anúncio, informa o motivo.
-      if (target.adUsers.size > 0) {
-        const adId = [...target.adUsers][0];
-        const adUser = target.users.get(adId);
-        send(ws, S2C.AD_PAUSE, { userId: adId, displayName: adUser?.displayName || '—' });
       }
       return broadcast(target, S2C.USER_JOINED, {
         user: { userId: ws.userId, displayName: ws.displayName, isHost: false },
@@ -223,7 +224,9 @@ export function handleMessage(manager, ws, raw) {
       if (!room) return sendError(ws, ERROR_CODES.NOT_IN_ROOM, 'Você não está em uma sala');
       const shouldPause = manager.markAdStarted(room, ws.userId);
       if (shouldPause) {
-        manager.updateState(room, { paused: true });
+        // NÃO marcamos paused no estado da sala: a pausa por anúncio é apenas
+        // temporária e imposta no cliente. Assim, ao retomar, o SYNC_STATE
+        // reflete o estado real (tocando) e todos voltam a reproduzir.
         const me = room.users.get(ws.userId);
         broadcast(room, S2C.AD_PAUSE, {
           userId: ws.userId,
