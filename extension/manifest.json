@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "YouSync",
+  "version": "0.1.0",
+  "description": "Sincronize a reprodução do YouTube em salas com outras pessoas em tempo real.",
+  "permissions": ["storage", "tabs", "scripting", "notifications"],
+  "host_permissions": [
+    "*://*.youtube.com/*",
+    "http://localhost/*",
+    "https://localhost/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "YouSync",
+    "default_popup": "popup/popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.youtube.com/*"],
+      "js": ["shared/protocol.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="popup.css" />
+  <title>YouSync</title>
+</head>
+<body>
+  <header class="header">
+    <div class="brand">
+      <span class="logo">▶</span>
+      <span>You<strong>Sync</strong></span>
+    </div>
+    <span id="conn-dot" class="dot" title="desconectado"></span>
+  </header>
+
+  <main class="content">
+    <!-- Erro -->
+    <div id="error" class="error hidden"></div>
+
+    <!-- Banner de anúncio -->
+    <div id="ad-banner" class="ad-banner hidden"></div>
+
+    <!-- 1. Desativado -->
+    <section id="view-off" class="view">
+      <p class="muted">Ative o YouSync para criar ou entrar em uma sala.</p>
+      <label class="field">
+        <span>Servidor</span>
+        <input id="server-url" type="text" placeholder="ws://localhost:8080" />
+      </label>
+      <button id="btn-activate" class="btn primary">Ativar YouSync</button>
+    </section>
+
+    <!-- 2. Ativo, fora de sala -->
+    <section id="view-lobby" class="view hidden">
+      <label class="field">
+        <span>Seu apelido</span>
+        <input id="display-name" type="text" placeholder="Como aparecer na sala" maxlength="24" />
+      </label>
+
+      <div class="card">
+        <h3>Criar sala</h3>
+        <label class="field">
+          <span>Nome da sala</span>
+          <input id="room-name" type="text" placeholder="Ex.: Sessão de sexta" maxlength="40" />
+        </label>
+        <label class="check">
+          <input id="room-public" type="checkbox" />
+          <span>Sala pública (aparece na lista)</span>
+        </label>
+        <button id="btn-create" class="btn primary">Criar e virar host</button>
+      </div>
+
+      <div class="card">
+        <div class="row-between">
+          <h3>Entrar em sala</h3>
+          <button id="btn-refresh" class="btn link">Atualizar</button>
+        </div>
+        <ul id="public-rooms" class="rooms"></ul>
+        <div class="join-by-code">
+          <input id="room-code" type="text" placeholder="Código" maxlength="6" />
+          <button id="btn-join" class="btn">Entrar</button>
+        </div>
+      </div>
+
+      <button id="btn-deactivate" class="btn ghost">Desativar</button>
+    </section>
+
+    <!-- 3. Dentro da sala -->
+    <section id="view-room" class="view hidden">
+      <div class="card">
+        <div class="row-between">
+          <h3 id="room-title">Sala</h3>
+          <span id="host-badge" class="badge hidden">HOST</span>
+        </div>
+        <div class="code-row">
+          <span class="muted">Código:</span>
+          <code id="room-code-display">------</code>
+          <button id="btn-copy" class="btn link">copiar</button>
+        </div>
+        <p id="room-visibility" class="muted small"></p>
+      </div>
+
+      <div class="card">
+        <h3>Participantes</h3>
+        <ul id="participants" class="participants"></ul>
+      </div>
+
+      <button id="btn-leave" class="btn ghost">Sair da sala</button>
+    </section>
+  </main>
+
+  <script src="../shared/protocol.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

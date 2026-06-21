@@ -1,0 +1,42 @@
+// Tipos de mensagem trocados entre cliente (extensão) e servidor.
+// Mantenha em sincronia com extension/shared/protocol.js.
+
+// Cliente -> Servidor
+export const C2S = {
+  CREATE_ROOM: 'CREATE_ROOM',
+  JOIN_ROOM: 'JOIN_ROOM',
+  LIST_ROOMS: 'LIST_ROOMS',
+  LEAVE_ROOM: 'LEAVE_ROOM',
+  PLAYBACK_ACTION: 'PLAYBACK_ACTION',
+  VIDEO_CHANGE: 'VIDEO_CHANGE',
+  TRANSFER_HOST: 'TRANSFER_HOST',
+  AD_STARTED: 'AD_STARTED',
+  AD_ENDED: 'AD_ENDED',
+  SYNC_REQUEST: 'SYNC_REQUEST',
+  PONG: 'PONG',
+};
+
+// Servidor -> Cliente
+export const S2C = {
+  ROOM_CREATED: 'ROOM_CREATED',
+  ROOM_JOINED: 'ROOM_JOINED',
+  ROOM_LIST: 'ROOM_LIST',
+  USER_JOINED: 'USER_JOINED',
+  USER_LEFT: 'USER_LEFT',
+  HOST_CHANGED: 'HOST_CHANGED',
+  PLAYBACK_ACTION: 'PLAYBACK_ACTION',
+  VIDEO_CHANGE: 'VIDEO_CHANGE',
+  AD_PAUSE: 'AD_PAUSE',
+  AD_RESUME: 'AD_RESUME',
+  SYNC_STATE: 'SYNC_STATE',
+  ERROR: 'ERROR',
+  PING: 'PING',
+};
+
+export const ERROR_CODES = {
+  ROOM_NOT_FOUND: 'ROOM_NOT_FOUND',
+  NOT_IN_ROOM: 'NOT_IN_ROOM',
+  NOT_HOST: 'NOT_HOST',
+  BAD_REQUEST: 'BAD_REQUEST',
+  TARGET_NOT_FOUND: 'TARGET_NOT_FOUND',
+};

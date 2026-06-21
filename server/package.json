@@ -1,0 +1,17 @@
+{
+  "name": "yousync-server",
+  "version": "0.1.0",
+  "description": "Servidor WebSocket do YouSync — sincronização de players do YouTube em salas",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
