@@ -56,6 +56,40 @@ function pushState() {
 
 // ---------- comunicação com o content script ----------
 
+// Injeta o content script numa aba que ainda não o possui (ex.: aba aberta
+// antes de a extensão ser carregada). Requer a permissão "scripting".
+async function injectContent(tabId) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['shared/protocol.js', 'content.js'],
+    });
+    log('content injetado na aba', tabId);
+    return true;
+  } catch (e) {
+    log('falha ao injetar content na aba', tabId, e?.message || e);
+    return false;
+  }
+}
+
+async function tabSend(tabId, message) {
+  try {
+    await chrome.tabs.sendMessage(tabId, message);
+    return true;
+  } catch {
+    // content provavelmente não está presente: injeta e tenta de novo.
+    const ok = await injectContent(tabId);
+    if (!ok) return false;
+    try {
+      await chrome.tabs.sendMessage(tabId, message);
+      return true;
+    } catch (e2) {
+      log('content ainda não respondeu após injeção na aba', tabId, e2?.message || e2);
+      return false;
+    }
+  }
+}
+
 async function sendToContent(message) {
   try {
     const tabs = await chrome.tabs.query({ url: '*://*.youtube.com/*' });
@@ -64,11 +98,7 @@ async function sendToContent(message) {
       return;
     }
     log('-> content', message.type, message.payload?.kind || message.payload?.role || '', `(${tabs.length} aba(s))`);
-    for (const tab of tabs) {
-      chrome.tabs.sendMessage(tab.id, message).catch((e) => {
-        log('content não respondeu na aba', tab.id, '— recarregue a aba do YouTube?', e?.message || e);
-      });
-    }
+    for (const tab of tabs) tabSend(tab.id, message);
   } catch (e) {
     log('sendToContent erro', e);
   }
@@ -254,12 +284,13 @@ async function applyVideoChange(payload, fromSync = false) {
       const url = new URL(tab.url);
       const currentId = url.searchParams.get('v');
       if (currentId !== payload.videoId) {
+        log('navegando aba', tab.id, 'para vídeo', payload.videoId);
         chrome.tabs.update(tab.id, { url: `https://www.youtube.com/watch?v=${payload.videoId}` });
       } else {
-        chrome.tabs.sendMessage(tab.id, {
+        tabSend(tab.id, {
           type: INTERNAL.CONTENT_APPLY,
           payload: { kind: 'video', ...payload },
-        }).catch(() => {});
+        });
       }
     }
   } catch (_) {}
@@ -381,10 +412,11 @@ function handleContentEvent(payload) {
 // Quando uma aba do YouTube termina de carregar, reenvia o papel atual.
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' && tab.url && tab.url.includes('youtube.com') && state.room) {
-    chrome.tabs.sendMessage(tabId, {
+    log('aba', tabId, 'carregou — reenviando papel');
+    tabSend(tabId, {
       type: INTERNAL.CONTENT_SET_ROLE,
       payload: { role: state.isHost ? 'host' : 'participant' },
-    }).catch(() => {});
+    });
   }
 });
 

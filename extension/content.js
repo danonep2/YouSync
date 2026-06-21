@@ -5,6 +5,10 @@
 // - anúncios: detectados em qualquer papel e reportados ao servidor.
 
 (function () {
+  // Evita execução dupla (manifest + injeção sob demanda via scripting).
+  if (self.__yousyncLoaded) return;
+  self.__yousyncLoaded = true;
+
   const PROTO = self.YOUSYNC_PROTOCOL;
   if (!PROTO) {
     console.error('[YouSync][content] protocol.js não carregou — verifique a ordem em content_scripts');
