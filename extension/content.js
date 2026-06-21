@@ -1,7 +1,8 @@
-// Content script injetado no YouTube. Só age após receber um papel
-// (host/participant) do background — respeitando "não iniciar automaticamente".
-// - host: observa o player e envia ações ao servidor.
-// - participant: aplica as ações recebidas no player.
+// Content script injetado no YouTube. Só age após receber um papel do background.
+// - quem pode controlar (host, ou todos no modo "controles compartilhados"):
+//   observa o player e envia ações de reprodução.
+// - troca de vídeo: exclusiva do host.
+// - participante: aplica as ações recebidas.
 // - anúncios: detectados em qualquer papel e reportados ao servidor.
 
 (function () {
@@ -21,32 +22,28 @@
 
   const SEEK_TOLERANCE = 0.75; // segundos de drift tolerado
   const POLL_MS = 1000;
+  const READY_TIMEOUT_MS = 10000;
 
   let role = 'idle';
+  let canControl = false; // pode emitir ações de reprodução?
   let applyingRemote = false; // evita eco quando aplicamos ação remota
-  let adShowing = false;
-  let adPausedByRoom = false; // sala pausada por anúncio (não dar play)
+  let adShowing = false; // este player está exibindo anúncio agora
+  let adPausedByRoom = false; // sala pausada por anúncio de OUTRO usuário
   let lastVideoId = currentVideoId();
   let pollTimer = null;
-  let hostAttached = false;
-  let currentVideoEl = null; // referência ao <video> em que os listeners estão
+  let listenersAttached = false;
+  let currentVideoEl = null; // <video> em que os listeners estão
 
   log('carregado em', location.href);
 
   function getVideo() {
     return document.querySelector('video.html5-main-video') || document.querySelector('video');
   }
-
   function getPlayer() {
     return document.querySelector('.html5-video-player');
   }
-
   function currentVideoId() {
-    try {
-      return new URLSearchParams(location.search).get('v');
-    } catch {
-      return null;
-    }
+    try { return new URLSearchParams(location.search).get('v'); } catch { return null; }
   }
 
   function sendEvent(payload) {
@@ -56,7 +53,7 @@
     });
   }
 
-  // ---------- host: ouvir o player ----------
+  // ---------- ouvir o player (quem pode controlar) ----------
 
   function onPlay() {
     if (applyingRemote || adShowing) return;
@@ -79,43 +76,39 @@
     sendEvent({ event: 'rate', time: v ? v.currentTime : 0, rate: v ? v.playbackRate : 1 });
   }
 
-  function detachHostListeners() {
-    if (currentVideoEl && hostAttached) {
+  function detachListeners() {
+    if (currentVideoEl && listenersAttached) {
       currentVideoEl.removeEventListener('play', onPlay);
       currentVideoEl.removeEventListener('pause', onPause);
       currentVideoEl.removeEventListener('seeked', onSeeked);
       currentVideoEl.removeEventListener('ratechange', onRateChange);
-      log('host listeners desanexados');
+      log('listeners de controle desanexados');
     }
-    hostAttached = false;
+    listenersAttached = false;
   }
 
-  // Garante que os listeners do host estejam no <video> atual.
-  // Reanexa se o elemento foi trocado pela navegação SPA do YouTube.
-  function ensureHostListeners() {
-    if (role !== 'host') return;
+  // Garante listeners no <video> atual quando o usuário pode controlar.
+  // Reanexa se o YouTube trocar o elemento <video> na navegação SPA.
+  function ensureListeners() {
+    if (!canControl) { detachListeners(); return; }
     const v = getVideo();
-    if (!v) {
-      log('host: <video> ainda não disponível, tentará novamente no próximo poll');
-      return;
-    }
-    if (v === currentVideoEl && hostAttached) return;
-    detachHostListeners();
+    if (!v) { log('controle: <video> ainda não disponível'); return; }
+    if (v === currentVideoEl && listenersAttached) return;
+    detachListeners();
     currentVideoEl = v;
     v.addEventListener('play', onPlay);
     v.addEventListener('pause', onPause);
     v.addEventListener('seeked', onSeeked);
     v.addEventListener('ratechange', onRateChange);
-    hostAttached = true;
-    log('host listeners anexados ao <video>');
+    listenersAttached = true;
+    log('listeners de controle anexados ao <video>');
   }
 
-  // ---------- participante: aplicar ações remotas ----------
+  // ---------- aplicar ações remotas ----------
 
   function withRemote(fn) {
     applyingRemote = true;
     try { fn(); } finally {
-      // libera no próximo tick para deixar os eventos do player passarem
       setTimeout(() => { applyingRemote = false; }, 80);
     }
   }
@@ -140,7 +133,7 @@
   function applyPlayback(payload) {
     const v = getVideo();
     if (!v) { log('applyPlayback: sem <video>'); return; }
-    log('<- aplicar playback', payload.action, payload);
+    log('<- playback', payload.action, payload);
     withRemote(() => {
       const t = compensatedTime(payload);
       if (payload.action === 'seek') {
@@ -160,7 +153,7 @@
   function applySync(payload) {
     const v = getVideo();
     if (!v) { log('applySync: sem <video>'); return; }
-    log('<- aplicar sync', payload);
+    log('<- sync', payload);
     withRemote(() => {
       const t = compensatedTime(payload);
       applySeekIfNeeded(v, t);
@@ -171,16 +164,58 @@
     });
   }
 
+  // ---------- carregamento sincronizado de vídeo ----------
+
+  // Carrega o vídeo PAUSADO e avisa o servidor quando estiver pronto.
+  function prepare(payload) {
+    log('<- prepare (carregar pausado)', payload);
+    const apply = () => {
+      const v = getVideo();
+      if (!v) { setTimeout(apply, 250); return; }
+      withRemote(() => {
+        applySeekIfNeeded(v, typeof payload.time === 'number' ? payload.time : 0);
+        v.pause();
+      });
+      waitReady(payload.videoId, v);
+    };
+    apply();
+  }
+
+  function waitReady(videoId, v) {
+    let done = false;
+    const report = () => {
+      if (done) return;
+      done = true;
+      v.removeEventListener('canplay', report);
+      log('vídeo pronto, reportando ao servidor');
+      sendEvent({ event: 'video_ready', videoId });
+    };
+    if (v.readyState >= 3) { report(); return; } // HAVE_FUTURE_DATA
+    v.addEventListener('canplay', report);
+    setTimeout(report, READY_TIMEOUT_MS); // fallback: não trava a sala
+  }
+
+  // Início simultâneo após todos estarem prontos.
+  function start(payload) {
+    const v = getVideo();
+    if (!v) { log('start: sem <video>'); return; }
+    log('<- start (play simultâneo)', payload);
+    withRemote(() => {
+      applySeekIfNeeded(v, compensatedTime({ ...payload, paused: false }));
+      if (!adPausedByRoom) v.play().catch((e) => log('play() bloqueado', e));
+    });
+  }
+
   // ---------- detecção de anúncio + troca de vídeo + reanexo (poll) ----------
 
   function poll() {
-    ensureHostListeners();
+    ensureListeners();
 
     const player = getPlayer();
     const nowAd = !!player && player.classList.contains('ad-showing');
     if (nowAd !== adShowing) {
       adShowing = nowAd;
-      log('estado de anúncio mudou ->', nowAd ? 'ANÚNCIO' : 'sem anúncio');
+      log('anúncio local ->', nowAd ? 'ANÚNCIO' : 'sem anúncio');
       sendEvent({ event: nowAd ? 'ad_started' : 'ad_ended' });
     }
 
@@ -206,12 +241,13 @@
     pollTimer = null;
   }
 
-  // ---------- aplicação do papel ----------
+  // ---------- papel ----------
 
-  function setRole(newRole) {
-    log('papel definido ->', newRole);
-    role = newRole;
-    detachHostListeners();
+  function setRole(payload) {
+    role = payload.role;
+    canControl = !!payload.canControl;
+    log('papel ->', role, 'canControl=', canControl);
+    detachListeners();
     currentVideoEl = null;
     if (role === 'idle') {
       stopPoll();
@@ -219,7 +255,7 @@
       return;
     }
     startPoll();
-    if (role === 'host') ensureHostListeners();
+    ensureListeners();
   }
 
   // ---------- mensagens do background ----------
@@ -227,24 +263,25 @@
   chrome.runtime.onMessage.addListener((message) => {
     const { type, payload = {} } = message || {};
     if (type === INTERNAL.CONTENT_SET_ROLE) {
-      setRole(payload.role);
+      setRole(payload);
       return;
     }
     if (type === INTERNAL.CONTENT_APPLY) {
       switch (payload.kind) {
-        case 'playback':
-          applyPlayback(payload);
-          break;
-        case 'video':
-          applySync({ ...payload, paused: false });
-          break;
-        case 'sync':
-          applySync(payload);
-          break;
+        case 'playback': applyPlayback(payload); break;
+        case 'sync': applySync(payload); break;
+        case 'prepare': prepare(payload); break;
+        case 'start': start(payload); break;
         case 'ad_pause':
-          log('<- AD_PAUSE: pausando localmente');
+          // A sala pausou por anúncio. Se o anúncio é MEU, continuo reproduzindo
+          // (para assistir/pular); só pauso se o anúncio é de outra pessoa.
           adPausedByRoom = true;
-          withRemote(() => { const v = getVideo(); if (v) v.pause(); });
+          if (adShowing) {
+            log('<- AD_PAUSE: o anúncio é meu, continuo reproduzindo');
+          } else {
+            log('<- AD_PAUSE: pausando até o anúncio de outro terminar');
+            withRemote(() => { const v = getVideo(); if (v) v.pause(); });
+          }
           break;
         case 'ad_resume':
           log('<- AD_RESUME');
@@ -254,9 +291,9 @@
     }
   });
 
-  // Diagnóstico rápido: yousyncDebug() no console da aba
+  // Diagnóstico: yousyncDebug() no console da aba
   self.yousyncDebug = () => ({
-    role, hostAttached, adShowing, adPausedByRoom,
+    role, canControl, listenersAttached, adShowing, adPausedByRoom,
     hasVideo: !!getVideo(), videoId: currentVideoId(), polling: !!pollTimer,
   });
 })();

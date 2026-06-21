@@ -31,9 +31,19 @@ function roomSummary(room) {
     code: room.code,
     name: room.name,
     isPublic: room.isPublic,
+    sharedControls: room.sharedControls,
     hostId: room.hostId,
     users: userListOf(room),
   };
+}
+
+const LOAD_TIMEOUT_MS = 12_000;
+
+// Inicia a reprodução para todos simultaneamente (fim do carregamento sincronizado).
+function startPlayback(manager, room) {
+  manager.endVideoLoad(room);
+  manager.updateState(room, { paused: false });
+  broadcast(room, S2C.START_PLAYBACK, { time: room.state.time, serverTime: Date.now() });
 }
 
 function syncStatePayload(room) {
@@ -70,6 +80,11 @@ export function leaveCurrentRoom(manager, ws) {
     broadcast(room, S2C.AD_RESUME, {});
     broadcast(room, S2C.SYNC_STATE, syncStatePayload(room));
   }
+
+  // Se faltava só ele para o carregamento sincronizado, inicia agora.
+  if (room.loadingVideoId != null && manager.allReady(room)) {
+    startPlayback(manager, room);
+  }
 }
 
 export function handleMessage(manager, ws, raw) {
@@ -94,6 +109,7 @@ export function handleMessage(manager, ws, raw) {
       const created = manager.createRoom({
         name: payload.name,
         isPublic: payload.isPublic,
+        sharedControls: payload.sharedControls,
         hostId: ws.userId,
         displayName: ws.displayName,
         ws,
@@ -121,6 +137,10 @@ export function handleMessage(manager, ws, raw) {
       });
       // Estado atual para o recém-chegado se alinhar.
       send(ws, S2C.SYNC_STATE, syncStatePayload(target));
+      // Se há um carregamento sincronizado em andamento, inclui o recém-chegado.
+      if (target.loadingVideoId != null) {
+        send(ws, S2C.VIDEO_CHANGE, { videoId: target.loadingVideoId, time: target.state.time, startPaused: true });
+      }
       // Se a sala está pausada por anúncio, informa o motivo.
       if (target.adUsers.size > 0) {
         const adId = [...target.adUsers][0];
@@ -141,7 +161,12 @@ export function handleMessage(manager, ws, raw) {
 
     case C2S.PLAYBACK_ACTION: {
       if (!room) return sendError(ws, ERROR_CODES.NOT_IN_ROOM, 'Você não está em uma sala');
-      if (!isHost) return sendError(ws, ERROR_CODES.NOT_HOST, 'Apenas o host controla a reprodução');
+      // Host sempre controla; com controles compartilhados, qualquer um controla.
+      if (!isHost && !room.sharedControls) {
+        return sendError(ws, ERROR_CODES.NOT_HOST, 'Apenas o host controla a reprodução');
+      }
+      // Durante o carregamento sincronizado, ignora ações até o play coletivo.
+      if (room.loadingVideoId != null) return;
       manager.updateState(room, {
         time: typeof payload.time === 'number' ? payload.time : room.state.time,
         paused: payload.action === 'pause' ? true : payload.action === 'play' ? false : room.state.paused,
@@ -152,13 +177,33 @@ export function handleMessage(manager, ws, raw) {
 
     case C2S.VIDEO_CHANGE: {
       if (!room) return sendError(ws, ERROR_CODES.NOT_IN_ROOM, 'Você não está em uma sala');
+      // Trocar o vídeo é sempre exclusivo do host (mesmo com controles compartilhados).
       if (!isHost) return sendError(ws, ERROR_CODES.NOT_HOST, 'Apenas o host troca o vídeo');
       manager.updateState(room, {
         videoId: payload.videoId,
         time: typeof payload.time === 'number' ? payload.time : 0,
-        paused: false,
+        paused: true,
       });
-      return broadcast(room, S2C.VIDEO_CHANGE, { ...payload, serverTime: Date.now() }, ws.userId);
+      // Inicia o carregamento sincronizado: todos pausados até todos ficarem prontos.
+      manager.beginVideoLoad(room, payload.videoId);
+      if (room.loadTimer) clearTimeout(room.loadTimer);
+      room.loadTimer = setTimeout(() => startPlayback(manager, room), LOAD_TIMEOUT_MS);
+      // Envia a TODOS (inclusive o host) o comando de carregar pausado.
+      return broadcast(room, S2C.VIDEO_CHANGE, { videoId: payload.videoId, time: room.state.time, startPaused: true });
+    }
+
+    case C2S.VIDEO_READY: {
+      if (!room) return;
+      const all = manager.markReady(room, ws.userId, payload.videoId);
+      if (all) startPlayback(manager, room);
+      return;
+    }
+
+    case C2S.SET_SHARED_CONTROLS: {
+      if (!room) return sendError(ws, ERROR_CODES.NOT_IN_ROOM, 'Você não está em uma sala');
+      if (!isHost) return sendError(ws, ERROR_CODES.NOT_HOST, 'Apenas o host altera os controles');
+      manager.setSharedControls(room, payload.enabled);
+      return broadcast(room, S2C.ROOM_UPDATED, { room: roomSummary(room) });
     }
 
     case C2S.TRANSFER_HOST: {

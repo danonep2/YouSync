@@ -24,15 +24,21 @@ export class RoomManager {
     return code;
   }
 
-  createRoom({ name, isPublic, hostId, displayName, ws }) {
+  createRoom({ name, isPublic, sharedControls, hostId, displayName, ws }) {
     const code = this.generateCode();
     const room = {
       code,
       name: name || `Sala ${code}`,
       isPublic: Boolean(isPublic),
+      sharedControls: Boolean(sharedControls),
       hostId,
       users: new Map(), // userId -> { ws, displayName }
       adUsers: new Set(), // userIds atualmente em anúncio
+      // Carregamento sincronizado de vídeo: enquanto loadingVideoId != null,
+      // todos esperam todos reportarem "pronto" antes do play.
+      loadingVideoId: null,
+      readyUsers: new Set(),
+      loadTimer: null,
       state: {
         videoId: null,
         time: 0,
@@ -106,6 +112,41 @@ export class RoomManager {
 
   updateState(room, patch) {
     Object.assign(room.state, patch, { updatedAt: Date.now() });
+  }
+
+  setSharedControls(room, enabled) {
+    room.sharedControls = Boolean(enabled);
+  }
+
+  // ----- carregamento sincronizado de vídeo -----
+
+  beginVideoLoad(room, videoId) {
+    room.loadingVideoId = videoId;
+    room.readyUsers = new Set();
+  }
+
+  /** Marca um usuário como pronto. @returns true se todos já estão prontos. */
+  markReady(room, userId, videoId) {
+    if (room.loadingVideoId == null || videoId !== room.loadingVideoId) return false;
+    room.readyUsers.add(userId);
+    return this.allReady(room);
+  }
+
+  allReady(room) {
+    if (room.loadingVideoId == null) return false;
+    for (const userId of room.users.keys()) {
+      if (!room.readyUsers.has(userId)) return false;
+    }
+    return room.users.size > 0;
+  }
+
+  endVideoLoad(room) {
+    room.loadingVideoId = null;
+    room.readyUsers = new Set();
+    if (room.loadTimer) {
+      clearTimeout(room.loadTimer);
+      room.loadTimer = null;
+    }
   }
 
   /** Registra início de anúncio. @returns true se a sala deve pausar agora. */

@@ -100,6 +100,14 @@ function renderRoom(state) {
   $('host-badge').classList.toggle('hidden', !state.isHost);
   $('room-visibility').textContent = room.isPublic ? 'Sala pública' : 'Sala privada';
 
+  // Controles compartilhados: host pode alternar; participante vê (somente leitura).
+  const sharedToggle = $('shared-toggle');
+  sharedToggle.checked = !!state.sharedControls;
+  sharedToggle.disabled = !state.isHost;
+  $('shared-toggle-wrap').title = state.isHost
+    ? 'Permitir que todos controlem a reprodução'
+    : 'Definido pelo host';
+
   const ul = $('participants');
   ul.innerHTML = '';
   for (const u of room.users || []) {
@@ -143,8 +151,13 @@ $('btn-create').addEventListener('click', () => {
   send(INTERNAL.CREATE_ROOM, {
     name: ($('room-name').value || '').trim(),
     isPublic: $('room-public').checked,
+    sharedControls: $('room-shared').checked,
     displayName: displayName(),
   });
+});
+
+$('shared-toggle').addEventListener('change', (e) => {
+  send(INTERNAL.SET_SHARED_CONTROLS, { enabled: e.target.checked });
 });
 
 $('btn-join').addEventListener('click', () => {

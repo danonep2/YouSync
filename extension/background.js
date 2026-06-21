@@ -23,14 +23,23 @@ let state = {
   connected: false,
   serverUrl: DEFAULT_SERVER,
   you: null,
-  room: null, // { code, name, isPublic, hostId, users:[] }
+  room: null, // { code, name, isPublic, sharedControls, hostId, users:[] }
   isHost: false,
+  sharedControls: false,
   publicRooms: [],
   adPause: null, // { displayName } quando a sala está pausada por anúncio
   lastError: null,
   // Guardado para reconectar automaticamente
   pending: null, // { kind:'create'|'join', ...payload, displayName }
 };
+
+// Ação a aplicar no content APÓS a aba terminar de navegar para o novo vídeo.
+let pendingApply = null; // { kind, payload, videoId }
+
+// Posso controlar a reprodução? (host sempre; demais só com controles compartilhados)
+function canControl() {
+  return state.isHost || state.sharedControls;
+}
 
 // ---------- persistência leve ----------
 
@@ -106,7 +115,10 @@ async function sendToContent(message) {
 
 function updateContentRole() {
   if (!state.room) return;
-  sendToContent({ type: INTERNAL.CONTENT_SET_ROLE, payload: { role: state.isHost ? 'host' : 'participant' } });
+  sendToContent({
+    type: INTERNAL.CONTENT_SET_ROLE,
+    payload: { role: state.isHost ? 'host' : 'participant', canControl: canControl() },
+  });
 }
 
 // ---------- WebSocket ----------
@@ -213,6 +225,7 @@ function handleServerMessage(raw) {
       state.you = payload.you;
       state.room = payload.room;
       state.isHost = payload.isHost;
+      state.sharedControls = !!payload.room.sharedControls;
       state.adPause = null;
       state.pending = {
         kind: type === S2C.ROOM_CREATED ? 'create' : 'join',
@@ -241,17 +254,31 @@ function handleServerMessage(raw) {
       updateContentRole();
       return pushState();
 
+    case S2C.ROOM_UPDATED:
+      if (payload.room) {
+        state.room = { ...state.room, ...payload.room };
+        state.sharedControls = !!payload.room.sharedControls;
+        state.isHost = state.you === payload.room.hostId;
+      }
+      updateContentRole();
+      return pushState();
+
     case S2C.PLAYBACK_ACTION:
       sendToContent({ type: INTERNAL.CONTENT_APPLY, payload: { kind: 'playback', ...payload } });
       return;
 
     case S2C.VIDEO_CHANGE:
-      applyVideoChange(payload);
+      // Carregamento sincronizado: prepara o vídeo pausado em todos.
+      applyVideoState('prepare', payload);
+      return;
+
+    case S2C.START_PLAYBACK:
+      // Todos prontos: inicia simultaneamente.
+      sendToContent({ type: INTERNAL.CONTENT_APPLY, payload: { kind: 'start', ...payload } });
       return;
 
     case S2C.SYNC_STATE:
-      if (payload.videoId) applyVideoChange(payload, true);
-      sendToContent({ type: INTERNAL.CONTENT_APPLY, payload: { kind: 'sync', ...payload } });
+      applyVideoState('sync', payload);
       return;
 
     case S2C.AD_PAUSE:
@@ -275,25 +302,33 @@ function displayNameOf() {
   return (state.pending && state.pending.payload && state.pending.payload.displayName) || 'Anônimo';
 }
 
-// Garante que a aba do YouTube esteja no vídeo certo antes de aplicar o estado.
-async function applyVideoChange(payload, fromSync = false) {
-  if (!payload.videoId) return;
+// Garante que a aba esteja no vídeo certo e aplica a ação ('prepare' | 'sync').
+// Se precisar navegar, guarda a ação em pendingApply para aplicar quando a aba
+// terminar de carregar (ver chrome.tabs.onUpdated).
+async function applyVideoState(kind, payload) {
+  const videoId = payload.videoId || null;
   try {
     const tabs = await chrome.tabs.query({ url: '*://*.youtube.com/*' });
+    if (!tabs.length) {
+      log('applyVideoState: nenhuma aba do YouTube');
+      // Sem aba ainda: guarda para quando uma aba do YouTube carregar.
+      if (videoId) pendingApply = { kind, payload, videoId };
+      return;
+    }
     for (const tab of tabs) {
-      const url = new URL(tab.url);
-      const currentId = url.searchParams.get('v');
-      if (currentId !== payload.videoId) {
-        log('navegando aba', tab.id, 'para vídeo', payload.videoId);
-        chrome.tabs.update(tab.id, { url: `https://www.youtube.com/watch?v=${payload.videoId}` });
+      let currentId = null;
+      try { currentId = new URL(tab.url).searchParams.get('v'); } catch {}
+      if (videoId && currentId !== videoId) {
+        log('navegando aba', tab.id, '-> vídeo', videoId, `(aplicar '${kind}' após carregar)`);
+        pendingApply = { kind, payload, videoId };
+        chrome.tabs.update(tab.id, { url: `https://www.youtube.com/watch?v=${videoId}` });
       } else {
-        tabSend(tab.id, {
-          type: INTERNAL.CONTENT_APPLY,
-          payload: { kind: 'video', ...payload },
-        });
+        tabSend(tab.id, { type: INTERNAL.CONTENT_APPLY, payload: { kind, ...payload } });
       }
     }
-  } catch (_) {}
+  } catch (e) {
+    log('applyVideoState erro', e);
+  }
 }
 
 function notifyAd(displayName) {
@@ -344,7 +379,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case INTERNAL.CREATE_ROOM:
       state.lastError = null;
-      wsSend(C2S.CREATE_ROOM, { name: payload.name, isPublic: payload.isPublic, displayName: payload.displayName });
+      wsSend(C2S.CREATE_ROOM, {
+        name: payload.name,
+        isPublic: payload.isPublic,
+        sharedControls: payload.sharedControls,
+        displayName: payload.displayName,
+      });
       sendResponse({ ok: true });
       return false;
 
@@ -375,6 +415,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: true });
       return false;
 
+    case INTERNAL.SET_SHARED_CONTROLS:
+      wsSend(C2S.SET_SHARED_CONTROLS, { enabled: payload.enabled });
+      sendResponse({ ok: true });
+      return false;
+
     case INTERNAL.CONTENT_EVENT:
       handleContentEvent(payload);
       return false;
@@ -383,13 +428,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // Eventos vindos do player (content script).
 function handleContentEvent(payload) {
-  log('<- content evento', payload.event, 'isHost=', state.isHost, payload);
+  log('<- content evento', payload.event, 'canControl=', canControl(), payload);
   switch (payload.event) {
     case 'play':
     case 'pause':
     case 'seek':
     case 'rate':
-      if (state.isHost) {
+      // Host sempre; demais só com controles compartilhados.
+      if (canControl()) {
         wsSend(C2S.PLAYBACK_ACTION, {
           action: payload.event,
           time: payload.time,
@@ -398,10 +444,13 @@ function handleContentEvent(payload) {
       }
       return;
     case 'video':
+      // Trocar o vídeo é exclusivo do host.
       if (state.isHost) {
         wsSend(C2S.VIDEO_CHANGE, { videoId: payload.videoId, time: payload.time });
       }
       return;
+    case 'video_ready':
+      return wsSend(C2S.VIDEO_READY, { videoId: payload.videoId });
     case 'ad_started':
       return wsSend(C2S.AD_STARTED, {});
     case 'ad_ended':
@@ -409,14 +458,25 @@ function handleContentEvent(payload) {
   }
 }
 
-// Quando uma aba do YouTube termina de carregar, reenvia o papel atual.
+// Quando uma aba do YouTube termina de carregar, reenvia o papel atual e,
+// se havia uma ação pendente de troca de vídeo, aplica-a agora.
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' && tab.url && tab.url.includes('youtube.com') && state.room) {
     log('aba', tabId, 'carregou — reenviando papel');
     tabSend(tabId, {
       type: INTERNAL.CONTENT_SET_ROLE,
-      payload: { role: state.isHost ? 'host' : 'participant' },
+      payload: { role: state.isHost ? 'host' : 'participant', canControl: canControl() },
     });
+    if (pendingApply) {
+      let currentId = null;
+      try { currentId = new URL(tab.url).searchParams.get('v'); } catch {}
+      if (currentId === pendingApply.videoId) {
+        const { kind, payload } = pendingApply;
+        pendingApply = null;
+        log('aplicando ação pendente', kind, 'na aba', tabId);
+        tabSend(tabId, { type: INTERNAL.CONTENT_APPLY, payload: { kind, ...payload } });
+      }
+    }
   }
 });
 

@@ -22,8 +22,15 @@ yousync/
 - Criador da sala é o **host**; pode **transferir o host** para outro participante.
 - Se o host sai, o próximo participante é **promovido automaticamente**.
 - Sincronização completa: estado de reprodução **e** troca de vídeo.
-- **Pausa por anúncio**: detecção via player do YouTube; pausa global e
-  identificação de quem recebeu o anúncio (banner no popup + notificação).
+- **Controles compartilhados** (opcional): qualquer participante controla a
+  reprodução (play/pause/seek/velocidade), mas **só o host troca o vídeo**.
+  Pode ser definido ao criar a sala e ligado/desligado pelo host a qualquer hora.
+- **Troca de vídeo sincronizada**: ao trocar, **todos iniciam pausados**; o
+  servidor só dispara o play quando **todos** tiverem o novo vídeo carregado
+  (com timeout de segurança de 12s). Elimina o atraso de quem carrega mais devagar.
+- **Pausa por anúncio**: quem está com o anúncio **continua reproduzindo** (para
+  assistir/pular); os demais pausam e o popup identifica quem recebeu o anúncio.
+  Quando o anúncio termina/é pulado, todos retornam juntos.
 - A extensão **não inicia sozinha** no YouTube — o usuário ativa pelo popup.
 
 ## 1. Servidor
