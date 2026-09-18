@@ -77,6 +77,7 @@ export function leaveCurrentRoom(manager, ws) {
 
   // Saída de quem estava em anúncio pode liberar a sala.
   if (result.adResumed) {
+    manager.updateState(room, { paused: false });
     broadcast(room, S2C.AD_RESUME, {});
     broadcast(room, S2C.SYNC_STATE, syncStatePayload(room));
   }
@@ -168,6 +169,10 @@ export function handleMessage(manager, ws, raw) {
       }
       // Durante o carregamento sincronizado, ignora ações até o play coletivo.
       if (room.loadingVideoId != null) return;
+      // Durante um anúncio, o controle de reprodução fica suspenso: ignoramos
+      // eventos (inclusive os play/pause espúrios que o YouTube dispara ao
+      // entrar/sair do anúncio). A retomada é feita pelo AD_RESUME.
+      if (room.adUsers.size > 0) return;
       manager.updateState(room, {
         time: typeof payload.time === 'number' ? payload.time : room.state.time,
         paused: payload.action === 'pause' ? true : payload.action === 'play' ? false : room.state.paused,
@@ -240,6 +245,9 @@ export function handleMessage(manager, ws, raw) {
       if (!room) return sendError(ws, ERROR_CODES.NOT_IN_ROOM, 'Você não está em uma sala');
       const shouldResume = manager.markAdEnded(room, ws.userId);
       if (shouldResume) {
+        // Anúncio interrompe conteúdo que estava tocando: ao terminar, todos
+        // retomam a reprodução (evita ficar preso em paused por evento espúrio).
+        manager.updateState(room, { paused: false });
         broadcast(room, S2C.AD_RESUME, {});
         broadcast(room, S2C.SYNC_STATE, syncStatePayload(room));
       }

@@ -45,6 +45,11 @@
   function currentVideoId() {
     try { return new URLSearchParams(location.search).get('v'); } catch { return null; }
   }
+  // Verificação AO VIVO do anúncio (evita a latência do poll de 1s).
+  function isAdActive() {
+    const p = getPlayer();
+    return !!p && p.classList.contains('ad-showing');
+  }
 
   function sendEvent(payload) {
     log('-> evento', payload.event, payload);
@@ -55,23 +60,29 @@
 
   // ---------- ouvir o player (quem pode controlar) ----------
 
+  // Durante um anúncio (deste player), NÃO emitimos eventos de reprodução:
+  // o YouTube dispara play/pause ao trocar para o anúncio e de volta, e isso
+  // poluiria o estado da sala. Checamos adShowing (poll) E o DOM ao vivo.
+  function adOrRemote() {
+    return applyingRemote || adShowing || isAdActive();
+  }
   function onPlay() {
-    if (applyingRemote || adShowing) return;
+    if (adOrRemote()) return;
     const v = getVideo();
     sendEvent({ event: 'play', time: v ? v.currentTime : 0 });
   }
   function onPause() {
-    if (applyingRemote || adShowing) return;
+    if (adOrRemote()) return;
     const v = getVideo();
     sendEvent({ event: 'pause', time: v ? v.currentTime : 0 });
   }
   function onSeeked() {
-    if (applyingRemote || adShowing) return;
+    if (adOrRemote()) return;
     const v = getVideo();
     sendEvent({ event: 'seek', time: v ? v.currentTime : 0 });
   }
   function onRateChange() {
-    if (applyingRemote || adShowing) return;
+    if (adOrRemote()) return;
     const v = getVideo();
     sendEvent({ event: 'rate', time: v ? v.currentTime : 0, rate: v ? v.playbackRate : 1 });
   }
