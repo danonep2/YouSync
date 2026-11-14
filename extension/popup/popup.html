@@ -12,7 +12,10 @@
       <span class="logo">▶</span>
       <span>You<strong>Sync</strong></span>
     </div>
-    <span id="conn-dot" class="dot" title="desconectado"></span>
+    <div class="header-right">
+      <button id="instance-label" class="instance" type="button" title="Identificador deste navegador (clique para renomear)">…</button>
+      <span id="conn-dot" class="dot" title="desconectado"></span>
+    </div>
   </header>
 
   <main class="content">
@@ -100,6 +103,7 @@
   </main>
 
   <script src="../shared/protocol.js"></script>
+  <script src="../shared/instance.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

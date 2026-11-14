@@ -1,7 +1,8 @@
 const { INTERNAL } = self.YOUSYNC_PROTOCOL;
 
 const $ = (id) => document.getElementById(id);
-const log = (...a) => console.log('%c[YouSync][popup]', 'color:#ff0033', ...a);
+const INSTANCE = self.YOUSYNC_INSTANCE;
+const log = (...a) => console.log(`%c[YouSync][${INSTANCE.label}][popup]`, 'color:#ff0033', ...a);
 
 let lastState = null;
 
@@ -191,7 +192,18 @@ chrome.runtime.onMessage.addListener((message) => {
   }
 });
 
+// Identificador deste navegador (clique para renomear).
+function renderInstance(label) {
+  $('instance-label').textContent = label;
+}
+$('instance-label').addEventListener('click', async () => {
+  const next = prompt('Identificador deste navegador (aparece nos logs):', INSTANCE.label);
+  if (next != null) renderInstance(await INSTANCE.set(next));
+});
+INSTANCE.onChange(renderInstance);
+
 (async function init() {
+  renderInstance(await INSTANCE.init());
   const savedName = localStorage.getItem('yousync_name');
   if (savedName) $('display-name').value = savedName;
   const state = await chrome.runtime.sendMessage({ type: INTERNAL.GET_STATE }).catch(() => null);

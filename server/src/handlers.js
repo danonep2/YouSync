@@ -47,9 +47,13 @@ function startPlayback(manager, room) {
 }
 
 function syncStatePayload(room) {
+  // O estado guarda o tempo do ÚLTIMO evento; se está tocando, projeta o
+  // quanto o vídeo avançou desde então (senão quem entra volta no tempo).
+  const { time, paused, rate, updatedAt } = room.state;
+  const elapsed = paused ? 0 : Math.max(0, (Date.now() - updatedAt) / 1000) * (rate || 1);
   return {
     videoId: room.state.videoId,
-    time: room.state.time,
+    time: time + elapsed,
     paused: room.state.paused,
     rate: room.state.rate,
     serverTime: Date.now(),
@@ -178,7 +182,14 @@ export function handleMessage(manager, ws, raw) {
         paused: payload.action === 'pause' ? true : payload.action === 'play' ? false : room.state.paused,
         rate: typeof payload.rate === 'number' ? payload.rate : room.state.rate,
       });
-      return broadcast(room, S2C.PLAYBACK_ACTION, { ...payload, serverTime: Date.now() }, ws.userId);
+      // Inclui o estado autoritativo (paused/rate) para que ações como 'seek'
+      // também realinhem quem divergiu localmente (ex.: pausou sozinho).
+      return broadcast(room, S2C.PLAYBACK_ACTION, {
+        ...payload,
+        paused: room.state.paused,
+        rate: room.state.rate,
+        serverTime: Date.now(),
+      }, ws.userId);
     }
 
     case C2S.VIDEO_CHANGE: {
@@ -218,6 +229,22 @@ export function handleMessage(manager, ws, raw) {
       const ok = manager.transferHost(room, ws.userId, payload.targetUserId);
       if (!ok) return sendError(ws, ERROR_CODES.TARGET_NOT_FOUND, 'Usuário alvo não encontrado');
       return broadcast(room, S2C.HOST_CHANGED, { hostUserId: room.hostId });
+    }
+
+    case C2S.HOST_STATE: {
+      // Retrato do player do host ao assumir o papel (sala criada, host
+      // transferido, aba recarregada). Sem isso a sala nasce "pausada em 0"
+      // mesmo com o host tocando, e quem entra recebe esse estado errado.
+      if (!room) return sendError(ws, ERROR_CODES.NOT_IN_ROOM, 'Você não está em uma sala');
+      if (!isHost) return sendError(ws, ERROR_CODES.NOT_HOST, 'Apenas o host informa o estado');
+      if (room.loadingVideoId != null || room.adUsers.size > 0) return;
+      manager.updateState(room, {
+        videoId: typeof payload.videoId === 'string' ? payload.videoId : room.state.videoId,
+        time: typeof payload.time === 'number' ? payload.time : room.state.time,
+        paused: typeof payload.paused === 'boolean' ? payload.paused : room.state.paused,
+        rate: typeof payload.rate === 'number' ? payload.rate : room.state.rate,
+      });
+      return broadcast(room, S2C.SYNC_STATE, syncStatePayload(room), ws.userId);
     }
 
     case C2S.SYNC_REQUEST: {

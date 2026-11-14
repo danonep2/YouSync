@@ -1,16 +1,18 @@
 // Service worker: cérebro da sessão YouSync.
 // Mantém a conexão WebSocket, o estado da sala e roteia mensagens entre
 // o popup (UI), o content script (player do YouTube) e o servidor.
-importScripts('shared/protocol.js');
+importScripts('shared/protocol.js', 'shared/instance.js');
 
 const { C2S, S2C, INTERNAL } = self.YOUSYNC_PROTOCOL;
+const INSTANCE = self.YOUSYNC_INSTANCE;
+INSTANCE.init();
 
 const DEFAULT_SERVER = 'ws://localhost:8080';
 const RECONNECT_BASE = 1000;
 const RECONNECT_MAX = 15000;
 
 const DEBUG = true;
-const log = (...a) => DEBUG && console.log('%c[YouSync][bg]', 'color:#ff0033', ...a);
+const log = (...a) => DEBUG && console.log(`%c[YouSync][${INSTANCE.label}][bg]`, 'color:#ff0033', ...a);
 
 let ws = null;
 let reconnectAttempts = 0;
@@ -71,7 +73,7 @@ async function injectContent(tabId) {
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ['shared/protocol.js', 'content.js'],
+      files: ['shared/protocol.js', 'shared/instance.js', 'content.js'],
     });
     log('content injetado na aba', tabId);
     return true;
@@ -451,6 +453,16 @@ function handleContentEvent(payload) {
       // Trocar o vídeo é exclusivo do host.
       if (state.isHost) {
         wsSend(C2S.VIDEO_CHANGE, { videoId: payload.videoId, time: payload.time });
+      }
+      return;
+    case 'host_state':
+      if (state.isHost) {
+        wsSend(C2S.HOST_STATE, {
+          videoId: payload.videoId,
+          time: payload.time,
+          paused: payload.paused,
+          rate: payload.rate,
+        });
       }
       return;
     case 'video_ready':

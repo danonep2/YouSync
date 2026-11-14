@@ -17,6 +17,7 @@
       AD_STARTED: 'AD_STARTED',
       AD_ENDED: 'AD_ENDED',
       SYNC_REQUEST: 'SYNC_REQUEST',
+      HOST_STATE: 'HOST_STATE',
       PONG: 'PONG',
     },
     // Servidor -> Cliente
