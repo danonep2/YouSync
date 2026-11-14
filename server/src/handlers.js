@@ -33,6 +33,7 @@ function roomSummary(room) {
     isPublic: room.isPublic,
     sharedControls: room.sharedControls,
     hostId: room.hostId,
+    videoId: room.state.videoId,
     users: userListOf(room),
   };
 }

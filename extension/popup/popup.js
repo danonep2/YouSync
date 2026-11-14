@@ -5,6 +5,7 @@ const INSTANCE = self.YOUSYNC_INSTANCE;
 const log = (...a) => console.log(`%c[YouSync][${INSTANCE.label}][popup]`, 'color:#ff0033', ...a);
 
 let lastState = null;
+let myTabId = null; // aba sobre a qual o popup foi aberto
 
 function send(type, payload = {}) {
   log('-> bg', type, payload);
@@ -45,13 +46,17 @@ function render(state) {
     ad.classList.add('hidden');
   }
 
+  const inRoom = !!(state.active && state.room);
+  // Só uma aba é controlada: aberto em outra aba, o popup apenas informa.
+  const otherTab = inRoom && state.controlledTabId != null && myTabId !== state.controlledTabId;
   const showOff = !state.active;
-  const showRoom = state.active && state.room;
+  const showRoom = inRoom && !otherTab;
   const showLobby = state.active && !state.room;
 
   $('view-off').classList.toggle('hidden', !showOff);
   $('view-lobby').classList.toggle('hidden', !showLobby);
   $('view-room').classList.toggle('hidden', !showRoom);
+  $('view-other-tab').classList.toggle('hidden', !otherTab);
 
   if (showOff) {
     if (!$('server-url').value) $('server-url').value = state.serverUrl || 'ws://localhost:8080';
@@ -82,7 +87,7 @@ function renderRooms(rooms) {
     btn.className = 'btn link';
     btn.textContent = 'entrar';
     btn.addEventListener('click', () => {
-      send(INTERNAL.JOIN_ROOM, { roomCode: room.code, displayName: displayName() });
+      send(INTERNAL.JOIN_ROOM, { roomCode: room.code, displayName: displayName(), tabId: myTabId });
     });
     const meta = document.createElement('span');
     meta.style.display = 'flex';
@@ -157,6 +162,7 @@ $('btn-create').addEventListener('click', () => {
     isPublic: $('room-public').checked,
     sharedControls: $('room-shared').checked,
     displayName: displayName(),
+    tabId: myTabId,
   });
 });
 
@@ -167,7 +173,12 @@ $('shared-toggle').addEventListener('change', (e) => {
 $('btn-join').addEventListener('click', () => {
   const code = ($('room-code').value || '').trim().toUpperCase();
   if (!code) return;
-  send(INTERNAL.JOIN_ROOM, { roomCode: code, displayName: displayName() });
+  send(INTERNAL.JOIN_ROOM, { roomCode: code, displayName: displayName(), tabId: myTabId });
+});
+
+$('btn-focus-tab').addEventListener('click', () => {
+  send(INTERNAL.FOCUS_TAB);
+  window.close();
 });
 
 $('btn-refresh').addEventListener('click', () => send(INTERNAL.LIST_ROOMS));
@@ -204,6 +215,10 @@ INSTANCE.onChange(renderInstance);
 
 (async function init() {
   renderInstance(await INSTANCE.init());
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    myTabId = tab ? tab.id : null;
+  } catch (_) {}
   const savedName = localStorage.getItem('yousync_name');
   if (savedName) $('display-name').value = savedName;
   const state = await chrome.runtime.sendMessage({ type: INTERNAL.GET_STATE }).catch(() => null);

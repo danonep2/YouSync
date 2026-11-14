@@ -337,6 +337,8 @@
   // estar tocando antes da sala existir, e aí nenhum evento 'play' é emitido.
   function reportHostState(attempt = 0) {
     if (role !== 'host') return;
+    // Fora de /watch (ex.: página inicial com prévias) não há estado da sala a informar.
+    if (!currentVideoId()) return;
     const v = getVideo();
     if (!v || adOrRemote()) {
       // Sem <video> ainda, ou em anúncio (tempo/estado seriam do anúncio).

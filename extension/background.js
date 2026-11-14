@@ -33,7 +33,14 @@ let state = {
   lastError: null,
   // Guardado para reconectar automaticamente
   pending: null, // { kind:'create'|'join', ...payload, displayName }
+  // Única aba do YouTube controlada pela extensão (as demais ficam ociosas).
+  controlledTabId: null,
 };
+
+// Aba em que o popup pediu criar/entrar na sala (candidata a aba controlada).
+let requestedTabId = null;
+// Promessa da escolha de aba em andamento: quem fala com o content espera.
+let tabClaim = Promise.resolve();
 
 // Ação a aplicar no content APÓS a aba terminar de navegar para o novo vídeo.
 let pendingApply = null; // { kind, payload, videoId }
@@ -101,18 +108,75 @@ async function tabSend(tabId, message) {
   }
 }
 
-async function sendToContent(message) {
+// ---------- aba controlada (uma só por navegador) ----------
+
+const IDLE_ROLE = { type: INTERNAL.CONTENT_SET_ROLE, payload: { role: 'idle' } };
+
+function isYouTubeUrl(url) {
+  return /^https?:\/\/([^/]*\.)?youtube\.com\//.test(url || '');
+}
+
+async function getTab(tabId) {
+  if (tabId == null) return null;
+  try { return await chrome.tabs.get(tabId); } catch { return null; }
+}
+
+// Define a aba controlada e deixa ociosas as demais abas do YouTube.
+async function setControlledTab(tabId) {
+  const old = state.controlledTabId;
+  state.controlledTabId = tabId;
+  log('aba controlada ->', tabId, old != null && old !== tabId ? `(antes: ${old})` : '');
   try {
     const tabs = await chrome.tabs.query({ url: '*://*.youtube.com/*' });
-    if (!tabs.length) {
-      log('sendToContent: nenhuma aba do YouTube encontrada para', message.type);
-      return;
+    for (const t of tabs) {
+      if (t.id !== tabId) chrome.tabs.sendMessage(t.id, IDLE_ROLE).catch(() => {});
     }
-    log('-> content', message.type, message.payload?.kind || message.payload?.role || '', `(${tabs.length} aba(s))`);
-    for (const tab of tabs) tabSend(tab.id, message);
-  } catch (e) {
-    log('sendToContent erro', e);
+  } catch (_) {}
+  pushState();
+}
+
+// Escolhe a aba ao entrar na sala: se a aba em foco é do YouTube, usa e foca
+// nela; senão abre uma nova aba (no vídeo da sala, se conhecido) e foca nela.
+async function claimTab(preferredTabId, videoId) {
+  let tab = await getTab(preferredTabId);
+  if (!tab) {
+    try { [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }); } catch (_) {}
   }
+  try {
+    if (tab && isYouTubeUrl(tab.url)) {
+      await chrome.tabs.update(tab.id, { active: true });
+    } else {
+      const url = videoId ? `https://www.youtube.com/watch?v=${videoId}` : 'https://www.youtube.com/';
+      tab = await chrome.tabs.create({ url, active: true, ...(tab ? { windowId: tab.windowId } : {}) });
+      log('nova aba do YouTube aberta', tab.id, url);
+    }
+    await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+    await setControlledTab(tab.id);
+  } catch (e) {
+    log('claimTab erro', e?.message || e);
+  }
+}
+
+function startClaim(preferredTabId, videoId) {
+  tabClaim = tabClaim.then(() => claimTab(preferredTabId, videoId));
+  return tabClaim;
+}
+
+async function releaseControlledTab() {
+  const old = state.controlledTabId;
+  state.controlledTabId = null;
+  if (old != null) chrome.tabs.sendMessage(old, IDLE_ROLE).catch(() => {});
+}
+
+async function sendToContent(message) {
+  await tabClaim;
+  const tabId = state.controlledTabId;
+  if (tabId == null) {
+    log('sendToContent: nenhuma aba controlada para', message.type);
+    return;
+  }
+  log('-> content', message.type, message.payload?.kind || message.payload?.role || '', `(aba ${tabId})`);
+  tabSend(tabId, message);
 }
 
 function updateContentRole() {
@@ -236,7 +300,9 @@ function handleServerMessage(raw) {
           ? { name: payload.room.name, isPublic: payload.room.isPublic, displayName: displayNameOf() }
           : { roomCode: payload.room.code, displayName: displayNameOf() },
       };
-      updateContentRole();
+      // Pedido vindo do popup: escolhe a aba agora. Reentrada automática
+      // (reconexão): mantém a aba atual se ela ainda existir.
+      claimForRoom(payload.room && payload.room.videoId).then(() => updateContentRole());
       return pushState();
 
     case S2C.ROOM_LIST:
@@ -304,6 +370,27 @@ function handleServerMessage(raw) {
   }
 }
 
+async function claimForRoom(videoId) {
+  const fromUi = requestedTabId;
+  requestedTabId = null;
+  if (fromUi == null && (await getTab(state.controlledTabId))) return tabClaim;
+  return startClaim(fromUi, videoId);
+}
+
+// Sai da sala atual (pedido do usuário ou aba controlada fechada).
+function leaveRoom(reason) {
+  log('saindo da sala:', reason);
+  wsSend(C2S.LEAVE_ROOM, {});
+  state.room = null;
+  state.isHost = false;
+  state.adPause = null;
+  state.pending = null;
+  pendingApply = null;
+  releaseControlledTab();
+  pushState();
+  wsSend(C2S.LIST_ROOMS, {});
+}
+
 function displayNameOf() {
   return (state.pending && state.pending.payload && state.pending.payload.displayName) || 'Anônimo';
 }
@@ -314,23 +401,25 @@ function displayNameOf() {
 async function applyVideoState(kind, payload) {
   const videoId = payload.videoId || null;
   try {
-    const tabs = await chrome.tabs.query({ url: '*://*.youtube.com/*' });
-    if (!tabs.length) {
-      log('applyVideoState: nenhuma aba do YouTube');
-      // Sem aba ainda: guarda para quando uma aba do YouTube carregar.
+    await tabClaim;
+    const tab = await getTab(state.controlledTabId);
+    if (!tab) {
+      log('applyVideoState: nenhuma aba controlada');
       if (videoId) pendingApply = { kind, payload, videoId };
       return;
     }
-    for (const tab of tabs) {
-      let currentId = null;
-      try { currentId = new URL(tab.url).searchParams.get('v'); } catch {}
-      if (videoId && currentId !== videoId) {
-        log('navegando aba', tab.id, '-> vídeo', videoId, `(aplicar '${kind}' após carregar)`);
-        pendingApply = { kind, payload, videoId };
-        chrome.tabs.update(tab.id, { url: `https://www.youtube.com/watch?v=${videoId}` });
-      } else {
-        tabSend(tab.id, { type: INTERNAL.CONTENT_APPLY, payload: { kind, ...payload } });
-      }
+    const url = tab.pendingUrl || tab.url;
+    let currentId = null;
+    try { currentId = new URL(url).searchParams.get('v'); } catch {}
+    if (videoId && currentId !== videoId) {
+      log('navegando aba', tab.id, '-> vídeo', videoId, `(aplicar '${kind}' após carregar)`);
+      pendingApply = { kind, payload, videoId };
+      chrome.tabs.update(tab.id, { url: `https://www.youtube.com/watch?v=${videoId}` });
+    } else if (tab.status !== 'complete') {
+      // Aba recém-aberta ainda carregando: aplica quando terminar (onUpdated).
+      pendingApply = { kind, payload, videoId: currentId };
+    } else {
+      tabSend(tab.id, { type: INTERNAL.CONTENT_APPLY, payload: { kind, ...payload } });
     }
   } catch (e) {
     log('applyVideoState erro', e);
@@ -377,14 +466,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       state.isHost = false;
       state.adPause = null;
       state.pending = null;
+      pendingApply = null;
       disconnect();
-      sendToContent({ type: INTERNAL.CONTENT_SET_ROLE, payload: { role: 'idle' } });
+      releaseControlledTab();
       pushState();
       sendResponse({ ok: true });
       return false;
 
     case INTERNAL.CREATE_ROOM:
       state.lastError = null;
+      requestedTabId = typeof payload.tabId === 'number' ? payload.tabId : null;
       wsSend(C2S.CREATE_ROOM, {
         name: payload.name,
         isPublic: payload.isPublic,
@@ -396,6 +487,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case INTERNAL.JOIN_ROOM:
       state.lastError = null;
+      requestedTabId = typeof payload.tabId === 'number' ? payload.tabId : null;
       wsSend(C2S.JOIN_ROOM, { roomCode: payload.roomCode, displayName: payload.displayName });
       sendResponse({ ok: true });
       return false;
@@ -406,13 +498,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return false;
 
     case INTERNAL.LEAVE_ROOM:
-      wsSend(C2S.LEAVE_ROOM, {});
-      state.room = null;
-      state.isHost = false;
-      state.adPause = null;
-      state.pending = null;
-      sendToContent({ type: INTERNAL.CONTENT_SET_ROLE, payload: { role: 'idle' } });
-      pushState();
+      leaveRoom('pedido do usuário');
+      sendResponse({ ok: true });
+      return false;
+
+    case INTERNAL.FOCUS_TAB:
+      getTab(state.controlledTabId).then((tab) => {
+        if (!tab) return;
+        chrome.tabs.update(tab.id, { active: true });
+        chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+      });
       sendResponse({ ok: true });
       return false;
 
@@ -427,6 +522,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return false;
 
     case INTERNAL.CONTENT_EVENT:
+      // Só a aba controlada fala com a sala; demais abas do YouTube são ignoradas.
+      if (!sender.tab || sender.tab.id !== state.controlledTabId) return false;
       handleContentEvent(payload);
       return false;
   }
@@ -476,7 +573,16 @@ function handleContentEvent(payload) {
 
 // Quando uma aba do YouTube termina de carregar, reenvia o papel atual e,
 // se havia uma ação pendente de troca de vídeo, aplica-a agora.
+// A aba controlada foi fechada: sai da sala.
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (tabId === state.controlledTabId && state.room) {
+    state.controlledTabId = null;
+    leaveRoom(`aba controlada ${tabId} fechada`);
+  }
+});
+
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (tabId !== state.controlledTabId) return;
   if (changeInfo.status === 'complete' && tab.url && tab.url.includes('youtube.com') && state.room) {
     log('aba', tabId, 'carregou — reenviando papel');
     tabSend(tabId, {

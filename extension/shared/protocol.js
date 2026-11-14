@@ -51,6 +51,7 @@
       LEAVE_ROOM: 'UI_LEAVE_ROOM',
       TRANSFER_HOST: 'UI_TRANSFER_HOST',
       SET_SHARED_CONTROLS: 'UI_SET_SHARED_CONTROLS',
+      FOCUS_TAB: 'UI_FOCUS_TAB', // foca a aba controlada
       // background <-> content
       CONTENT_SET_ROLE: 'CONTENT_SET_ROLE', // {role:'host'|'participant'}
       CONTENT_APPLY: 'CONTENT_APPLY', // aplica ação remota no player
