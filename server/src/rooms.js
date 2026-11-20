@@ -34,6 +34,7 @@ export class RoomManager {
       hostId,
       users: new Map(), // userId -> { ws, displayName }
       adUsers: new Set(), // userIds atualmente em anúncio
+      adResumeTime: null, // posição do vídeo quando o anúncio começou (onde os demais pausaram)
       // Carregamento sincronizado de vídeo: enquanto loadingVideoId != null,
       // todos esperam todos reportarem "pronto" antes do play.
       loadingVideoId: null,

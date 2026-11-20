@@ -61,6 +61,17 @@ function syncStatePayload(room) {
   };
 }
 
+// Fim do anúncio: todos retomam de onde a sala pausou quando o anúncio começou.
+// Anúncio só interrompe conteúdo que estava tocando, então força paused=false
+// (evita ficar preso em paused por evento espúrio).
+function resumeAfterAd(manager, room) {
+  const time = room.adResumeTime ?? syncStatePayload(room).time;
+  room.adResumeTime = null;
+  manager.updateState(room, { time, paused: false });
+  broadcast(room, S2C.AD_RESUME, {});
+  broadcast(room, S2C.SYNC_STATE, syncStatePayload(room));
+}
+
 // Sai da sala atual (se houver) e notifica os demais.
 export function leaveCurrentRoom(manager, ws) {
   if (!ws.roomCode) return;
@@ -81,11 +92,7 @@ export function leaveCurrentRoom(manager, ws) {
   }
 
   // Saída de quem estava em anúncio pode liberar a sala.
-  if (result.adResumed) {
-    manager.updateState(room, { paused: false });
-    broadcast(room, S2C.AD_RESUME, {});
-    broadcast(room, S2C.SYNC_STATE, syncStatePayload(room));
-  }
+  if (result.adResumed) resumeAfterAd(manager, room);
 
   // Se faltava só ele para o carregamento sincronizado, inicia agora.
   if (room.loadingVideoId != null && manager.allReady(room)) {
@@ -258,8 +265,9 @@ export function handleMessage(manager, ws, raw) {
       const shouldPause = manager.markAdStarted(room, ws.userId);
       if (shouldPause) {
         // NÃO marcamos paused no estado da sala: a pausa por anúncio é apenas
-        // temporária e imposta no cliente. Assim, ao retomar, o SYNC_STATE
-        // reflete o estado real (tocando) e todos voltam a reproduzir.
+        // temporária e imposta no cliente. Guardamos a posição atual (projetada),
+        // que é onde os demais pausam, para retomar dela ao fim do anúncio.
+        room.adResumeTime = syncStatePayload(room).time;
         const me = room.users.get(ws.userId);
         broadcast(room, S2C.AD_PAUSE, {
           userId: ws.userId,
@@ -272,13 +280,7 @@ export function handleMessage(manager, ws, raw) {
     case C2S.AD_ENDED: {
       if (!room) return sendError(ws, ERROR_CODES.NOT_IN_ROOM, 'Você não está em uma sala');
       const shouldResume = manager.markAdEnded(room, ws.userId);
-      if (shouldResume) {
-        // Anúncio interrompe conteúdo que estava tocando: ao terminar, todos
-        // retomam a reprodução (evita ficar preso em paused por evento espúrio).
-        manager.updateState(room, { paused: false });
-        broadcast(room, S2C.AD_RESUME, {});
-        broadcast(room, S2C.SYNC_STATE, syncStatePayload(room));
-      }
+      if (shouldResume) resumeAfterAd(manager, room);
       return;
     }
 
