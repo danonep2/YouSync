@@ -47,6 +47,11 @@ Sobe em `http://localhost:8080` (HTTP de status + WebSocket no mesmo host/porta)
 A porta pode ser alterada via variável de ambiente `PORT` (veja `.env.example`).
 
 - `GET /health` → `{ "status": "ok", "rooms": <n> }`
+- `GET /admin` → painel de administração (requer a variável `ADMIN_TOKEN`; o token é pedido na página).
+  Mostra clientes conectados, clientes em sala, salas abertas/criadas e o consumo do processo
+  (CPU, memória, atraso do event loop, histórico dos últimos 10 min). Salas privadas aparecem só como
+  contagem — sem nome, código, vídeo ou participantes.
+- `GET /admin/api/stats` → os mesmos dados em JSON (`Authorization: Bearer <ADMIN_TOKEN>`).
 
 ## 2. Extensão
 

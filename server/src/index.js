@@ -3,6 +3,7 @@ import { WebSocketServer } from 'ws';
 import { RoomManager, newUserId } from './rooms.js';
 import { handleMessage, leaveCurrentRoom, send } from './handlers.js';
 import { S2C } from './protocol.js';
+import { handleAdmin, attachAdminMonitor } from './admin.js';
 
 const PORT = process.env.PORT || 8080;
 const HEARTBEAT_INTERVAL = 30_000;
@@ -10,6 +11,7 @@ const HEARTBEAT_INTERVAL = 30_000;
 const manager = new RoomManager();
 
 const server = http.createServer((req, res) => {
+  if (handleAdmin(req, res, manager, wss)) return;
   if (req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ status: 'ok', rooms: manager.rooms.size }));
@@ -19,6 +21,7 @@ const server = http.createServer((req, res) => {
 });
 
 const wss = new WebSocketServer({ server });
+attachAdminMonitor(wss);
 
 wss.on('connection', (ws) => {
   ws.userId = newUserId();

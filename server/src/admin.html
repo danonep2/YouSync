@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>YouSync Admin</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #16181d; --muted: #626a78;
+    --border: #e3e6eb; --accent: #e5322d; --accent-soft: #fde8e7;
+    --ok: #1f9d55; --warn: #c27c0e; --bad: #d23b3b;
+    --line1: #3b6fd8; --line2: #8a4fd1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --card: #171a21; --text: #e8eaef; --muted: #9098a6;
+      --border: #272b35; --accent: #ff5a52; --accent-soft: #3a1d1c;
+      --ok: #3ccf7f; --warn: #e6a634; --bad: #ff6b6b;
+      --line1: #6f9bff; --line2: #b88cff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 16px 24px; border-bottom: 1px solid var(--border); background: var(--card); flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 18px; }
+  header h1 span { color: var(--accent); }
+  .meta { color: var(--muted); font-size: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+  .dot.live { background: var(--ok); }
+  main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 28px 0 12px; }
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .kpi .label { color: var(--muted); font-size: 12px; }
+  .kpi .value { font-size: 28px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .kpi .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .charts { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+  .chart .head { display: flex; justify-content: space-between; align-items: baseline; }
+  .chart .head b { font-size: 20px; font-variant-numeric: tabular-nums; }
+  .chart svg { width: 100%; height: 60px; display: block; margin-top: 8px; }
+  .bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin-top: 8px; }
+  .bar > i { display: block; height: 100%; background: var(--line1); }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; }
+  tr:last-child td { border-bottom: 0; }
+  .table-wrap { overflow-x: auto; padding: 0; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; }
+  .pill.pub { background: var(--accent-soft); color: var(--accent); }
+  .pill.priv { background: var(--border); color: var(--muted); }
+  .pill.ad { background: var(--warn); color: #fff; }
+  .video { display: flex; gap: 10px; align-items: center; }
+  .video img { width: 96px; aspect-ratio: 16/9; object-fit: cover; border-radius: 6px; background: var(--border); }
+  .video a { color: var(--text); }
+  .users { display: flex; flex-wrap: wrap; gap: 4px; }
+  .users span { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; font-size: 12px; }
+  .muted { color: var(--muted); }
+  .hidden { display: none !important; }
+  .login { max-width: 360px; margin: 12vh auto; }
+  .login h1 { font-size: 20px; margin: 0 0 4px; }
+  .login p { color: var(--muted); margin: 0 0 16px; }
+  input, button { font: inherit; border-radius: 8px; border: 1px solid var(--border); padding: 9px 12px; }
+  input { width: 100%; background: var(--bg); color: var(--text); }
+  button { background: var(--accent); color: #fff; border-color: var(--accent); cursor: pointer; font-weight: 600; }
+  button.ghost { background: transparent; color: var(--muted); border-color: var(--border); padding: 4px 10px; font-weight: 500; }
+  .err { color: var(--bad); margin-top: 10px; min-height: 1.4em; }
+  .row { display: flex; gap: 8px; margin-top: 12px; }
+</style>
+</head>
+<body>
+
+<div id="login" class="card login">
+  <h1>YouSync <span style="color:var(--accent)">Admin</span></h1>
+  <p>Informe o token de administração (ADMIN_TOKEN).</p>
+  <form id="loginForm">
+    <input id="token" type="password" autocomplete="current-password" placeholder="Token" required>
+    <div class="row"><button type="submit">Entrar</button></div>
+    <div id="loginErr" class="err"></div>
+  </form>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <h1>YouSync <span>Admin</span></h1>
+    <div class="meta">
+      <span><i id="liveDot" class="dot"></i> <span id="updated">—</span></span>
+      <span id="uptime"></span>
+      <button class="ghost" id="logout">Sair</button>
+    </div>
+  </header>
+  <main>
+    <h2>Uso</h2>
+    <div class="grid">
+      <div class="card kpi"><div class="label">Clientes conectados</div><div class="value" id="k-conn">—</div><div class="sub" id="k-idle"></div></div>
+      <div class="card kpi"><div class="label">Clientes em sala</div><div class="value" id="k-inroom">—</div><div class="sub" id="k-inroom-pct"></div></div>
+      <div class="card kpi"><div class="label">Salas abertas</div><div class="value" id="k-rooms">—</div><div class="sub" id="k-split"></div></div>
+      <div class="card kpi"><div class="label">Salas criadas</div><div class="value" id="k-created">—</div><div class="sub">desde o início do servidor</div></div>
+    </div>
+
+    <h2>Consumo do processo</h2>
+    <div class="charts">
+      <div class="card chart">
+        <div class="head"><span class="muted">CPU</span><b id="c-cpu">—</b></div>
+        <svg id="s-cpu" preserveAspectRatio="none"></svg>
+        <div class="sub muted" id="c-cpu-sub"></div>
+      </div>
+      <div class="card chart">
+        <div class="head"><span class="muted">Memória (RSS)</span><b id="c-rss">—</b></div>
+        <svg id="s-rss" preserveAspectRatio="none"></svg>
+        <div class="sub muted" id="c-heap"></div>
+      </div>
+      <div class="card chart">
+        <div class="head"><span class="muted">Atraso do event loop (p99)</span><b id="c-loop">—</b></div>
+        <svg id="s-loop" preserveAspectRatio="none"></svg>
+        <div class="sub muted">acima de ~50 ms indica servidor sobrecarregado</div>
+      </div>
+      <div class="card chart">
+        <div class="head"><span class="muted">Clientes conectados</span><b id="c-clients">—</b></div>
+        <svg id="s-clients" preserveAspectRatio="none"></svg>
+        <div class="sub muted">histórico dos últimos 10 min</div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <div class="muted" style="font-size:12px">Memória do sistema em uso</div>
+      <div class="bar"><i id="sysmem-bar" style="width:0"></i></div>
+      <div class="muted" style="font-size:12px;margin-top:6px" id="sysmem"></div>
+      <div class="muted" style="font-size:12px;margin-top:6px" id="procinfo"></div>
+    </div>
+
+    <h2>Salas</h2>
+    <div class="card table-wrap">
+      <table>
+        <thead><tr><th>Sala</th><th>Tipo</th><th>Pessoas</th><th>Vídeo</th><th>Presentes</th><th>Aberta há</th></tr></thead>
+        <tbody id="rooms"></tbody>
+      </table>
+    </div>
+    <p class="muted" style="font-size:12px">Por privacidade, salas privadas mostram apenas contagens — sem nome, código, vídeo ou participantes.</p>
+  </main>
+</div>
+
+<script>
+(() => {
+  const REFRESH_MS = 5000;
+  const $ = (id) => document.getElementById(id);
+  let token = '';
+  try { token = sessionStorage.getItem('ys-admin-token') || ''; } catch {}
+  let timer = null;
+
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const fmtBytes = (b) => {
+    const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0;
+    while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+    return `${b.toFixed(b >= 100 || i === 0 ? 0 : 1)} ${u[i]}`;
+  };
+  const fmtDur = (sec) => {
+    sec = Math.max(0, Math.floor(sec));
+    const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+    if (d) return `${d}d ${h}h`;
+    if (h) return `${h}h ${m}min`;
+    if (m) return `${m}min`;
+    return `${s}s`;
+  };
+  const fmtClock = (sec) => {
+    const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+    return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s).padStart(2, '0');
+  };
+
+  function sparkline(svg, values, color, minMax = 0) {
+    const w = 300, h = 60, pad = 3;
+    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    if (values.length < 2) { svg.innerHTML = ''; return; }
+    const max = Math.max(minMax, ...values) || 1;
+    const step = w / (values.length - 1);
+    const pts = values.map((v, i) => `${(i * step).toFixed(1)},${(h - pad - (v / max) * (h - pad * 2)).toFixed(1)}`);
+    svg.innerHTML =
+      `<polygon points="0,${h} ${pts.join(' ')} ${w},${h}" fill="${color}" opacity=".12"/>` +
+      `<polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="1.8" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>`;
+  }
+
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+
+  function render(d) {
+    const t = d.totals;
+    $('k-conn').textContent = t.connectedClients;
+    $('k-idle').textContent = `${t.clientsIdle} fora de sala`;
+    $('k-inroom').textContent = t.clientsInRooms;
+    $('k-inroom-pct').textContent = t.connectedClients ? `${Math.round(t.clientsInRooms / t.connectedClients * 100)}% dos conectados` : '—';
+    $('k-rooms').textContent = t.openRooms;
+    $('k-split').textContent = `${t.publicRooms} públicas · ${t.privateRooms} privadas`;
+    $('k-created').textContent = t.roomsCreatedSinceStart;
+
+    const p = d.process, hist = p.history || [];
+    const coreNote = p.cpuCount > 1 ? ` · ${p.cpuCount} núcleos (100% = 1 núcleo)` : '';
+    $('c-cpu').textContent = `${p.cpuPercent.toFixed(1)}%`;
+    $('c-cpu-sub').textContent = `média ${(hist.reduce((a, s) => a + s.cpu, 0) / (hist.length || 1)).toFixed(1)}% nos últimos 10 min${coreNote}`;
+    $('c-rss').textContent = fmtBytes(p.memory.rss);
+    $('c-heap').textContent = `heap ${fmtBytes(p.memory.heapUsed)} de ${fmtBytes(p.memory.heapTotal)} · pico ${fmtBytes(Math.max(...hist.map((s) => s.rss), p.memory.rss))}`;
+    $('c-loop').textContent = `${p.eventLoopP99Ms.toFixed(1)} ms`;
+    $('c-clients').textContent = t.connectedClients;
+
+    sparkline($('s-cpu'), hist.map((s) => s.cpu), css('--line1'), 5);
+    sparkline($('s-rss'), hist.map((s) => s.rss), css('--line2'));
+    sparkline($('s-loop'), hist.map((s) => s.loopP99), css('--warn'), 25);
+    sparkline($('s-clients'), hist.map((s) => s.clients), css('--accent'), 2);
+
+    const used = p.memory.systemTotal - p.memory.systemFree;
+    $('sysmem-bar').style.width = `${(used / p.memory.systemTotal * 100).toFixed(1)}%`;
+    $('sysmem').textContent = `${fmtBytes(used)} de ${fmtBytes(p.memory.systemTotal)} · o YouSync usa ${(p.memory.rss / p.memory.systemTotal * 100).toFixed(2)}%`;
+    const load = p.loadAvg.some((x) => x > 0) ? ` · load avg ${p.loadAvg.map((x) => x.toFixed(2)).join(' / ')}` : '';
+    $('procinfo').textContent = `PID ${p.pid} · Node ${p.node} · ${p.platform}${load}`;
+
+    $('uptime').textContent = `no ar há ${fmtDur(p.uptimeSec)}`;
+    $('updated').textContent = `atualizado ${new Date(d.generatedAt).toLocaleTimeString('pt-BR')}`;
+
+    const now = d.generatedAt;
+    $('rooms').innerHTML = d.rooms.length ? d.rooms.map((r) => {
+      const age = fmtDur((now - r.createdAt) / 1000);
+      if (!r.isPublic) {
+        return `<tr><td class="muted">Sala privada</td><td><span class="pill priv">Privada</span></td>
+          <td>${r.userCount}</td><td class="muted">—</td><td class="muted">—</td><td>${age}</td></tr>`;
+      }
+      const v = r.video;
+      const video = v ? `<div class="video">
+          <img loading="lazy" alt="" src="https://i.ytimg.com/vi/${encodeURIComponent(v.videoId)}/mqdefault.jpg">
+          <div><a href="https://www.youtube.com/watch?v=${encodeURIComponent(v.videoId)}" target="_blank" rel="noopener noreferrer">${esc(v.videoId)}</a>
+          <div class="muted" style="font-size:12px">${v.paused ? '⏸ pausado' : '▶ tocando'} em ${fmtClock(v.time)}</div></div></div>`
+        : '<span class="muted">nenhum vídeo</span>';
+      const users = `<div class="users">${r.users.map((u) => `<span>${u.isHost ? '★ ' : ''}${esc(u.displayName)}</span>`).join('')}</div>`;
+      return `<tr><td><b>${esc(r.name)}</b><div class="muted" style="font-size:12px">${esc(r.code)}</div></td>
+        <td><span class="pill pub">Pública</span>${r.inAd ? ' <span class="pill ad">anúncio</span>' : ''}</td>
+        <td>${r.userCount}</td><td>${video}</td><td>${users}</td><td>${age}</td></tr>`;
+    }).join('') : '<tr><td colspan="6" class="muted">Nenhuma sala aberta no momento.</td></tr>';
+  }
+
+  async function load() {
+    try {
+      const res = await fetch('/admin/api/stats', { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' });
+      if (res.status === 401) return logout('Token inválido.');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      render(await res.json());
+      $('liveDot').classList.add('live');
+      showApp();
+    } catch (e) {
+      $('liveDot').classList.remove('live');
+      $('updated').textContent = `falha ao atualizar (${e.message})`;
+    }
+  }
+
+  function showApp() { $('login').classList.add('hidden'); $('app').classList.remove('hidden'); }
+  function start() { clearInterval(timer); load(); timer = setInterval(load, REFRESH_MS); }
+  function logout(msg = '') {
+    clearInterval(timer); token = '';
+    try { sessionStorage.removeItem('ys-admin-token'); } catch {}
+    $('app').classList.add('hidden'); $('login').classList.remove('hidden');
+    $('loginErr').textContent = msg;
+  }
+
+  $('loginForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    token = $('token').value.trim();
+    try { sessionStorage.setItem('ys-admin-token', token); } catch {}
+    $('loginErr').textContent = '';
+    start();
+  });
+  $('logout').addEventListener('click', () => logout());
+  if (token) start();
+})();
+</script>
+</body>
+</html>

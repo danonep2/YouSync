@@ -11,6 +11,9 @@ export class RoomManager {
   constructor() {
     /** @type {Map<string, Room>} code -> Room */
     this.rooms = new Map();
+    /** Total de salas criadas desde que o servidor subiu. */
+    this.totalCreated = 0;
+    this.startedAt = Date.now();
   }
 
   generateCode() {
@@ -32,6 +35,7 @@ export class RoomManager {
       isPublic: Boolean(isPublic),
       sharedControls: Boolean(sharedControls),
       hostId,
+      createdAt: Date.now(),
       users: new Map(), // userId -> { ws, displayName }
       adUsers: new Set(), // userIds atualmente em anúncio
       adResumeTime: null, // posição do vídeo quando o anúncio começou (onde os demais pausaram)
@@ -50,6 +54,7 @@ export class RoomManager {
     };
     room.users.set(hostId, { ws, displayName });
     this.rooms.set(code, room);
+    this.totalCreated++;
     return room;
   }
 
